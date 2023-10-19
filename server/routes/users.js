@@ -34,7 +34,7 @@ const checkCustomFieldValidation = (req, context, isEditRequest, onlyTheseFields
     const errorKey = field.label || field.property;
     if (!value || value.length === 0) {
       if (field[type].required) {
-        errorList[errorKey] = [ requiredErrorText || 'required' ];
+        errorList[errorKey] = [requiredErrorText || 'required'];
       }
       return;
     }
@@ -135,7 +135,7 @@ export default (storage, scriptManager) => {
           userFields
         };
 
-        const canCreateUser = settings.canCreateUser !== undefined ? settings.canCreateUser: true;
+        const canCreateUser = settings.canCreateUser !== undefined ? settings.canCreateUser : true;
         if (canCreateUser === false) {
           return next(new UnauthorizedError('Create user is forbidden'));
         }
@@ -306,7 +306,7 @@ export default (storage, scriptManager) => {
                   data.user.multifactor = data.user.multifactor.filter(item => item !== 'guardian');
                   data.user.multifactor = data.user.multifactor.length ? data.user.multifactor : null;
                 } else if (!data.user.multifactor && enrollments) {
-                  data.user.multifactor = [ 'guardian' ];
+                  data.user.multifactor = ['guardian'];
                 }
 
                 return res.json(data);
@@ -345,7 +345,7 @@ export default (storage, scriptManager) => {
 
     scriptManager.execute('settings', settingsContext)
       .then((settings) => {
-        const defaultFields = [ 'username', 'email', 'password', 'repeatPassword', 'connection' ];
+        const defaultFields = ['username', 'email', 'password', 'repeatPassword', 'connection'];
         const allowedFields = _.map(
           _.filter(settings.userFields,
             field => field.edit &&
@@ -393,7 +393,7 @@ export default (storage, scriptManager) => {
       .then((settings) => {
         // If userFields is specified in the settings hook, then call the write hook and pass the userFields.
         if (settings && settings.userFields) {
-          return executeWriteHook(req, scriptManager, settings.userFields, [ 'password', 'repeatPassword' ])
+          return executeWriteHook(req, scriptManager, settings.userFields, ['password', 'repeatPassword'])
             .then((payload) => {
               if (!payload.password) {
                 throw new ValidationError('The password is required.');
@@ -401,7 +401,7 @@ export default (storage, scriptManager) => {
 
               // Allow app_metadata in case someone needs to set a field in app_metadata to store a flag associated
               // with the change
-              payload = _.pick(payload, [ 'password', 'connection', 'verify_password', 'app_metadata' ]);
+              payload = _.pick(payload, ['password', 'connection', 'verify_password', 'app_metadata']);
 
               const payloadFinal = _.defaults(payload, {
                 connection: req.body.connection,
@@ -440,7 +440,7 @@ export default (storage, scriptManager) => {
       .then((settings) => {
         // If userFields is specified in the settings hook, then call the write hook and pass the userFields.
         if (settings && settings.userFields) {
-          executeWriteHook(req, scriptManager, settings.userFields, [ 'username' ])
+          executeWriteHook(req, scriptManager, settings.userFields, ['username'])
             .then((payload) => {
               if (!payload.username) {
                 throw new ValidationError('The username is required.');
@@ -474,7 +474,7 @@ export default (storage, scriptManager) => {
       .then((settings) => {
         // If userFields is specified in the settings hook, then call the write hook and pass the userFields.
         if (settings && settings.userFields) {
-          executeWriteHook(req, scriptManager, settings.userFields, [ 'email' ])
+          executeWriteHook(req, scriptManager, settings.userFields, ['email'])
             .then((payload) => {
               if (!payload.email) {
                 throw new ValidationError('The email is required.');
@@ -502,14 +502,43 @@ export default (storage, scriptManager) => {
         .then(async devices2 => {
           try {
             let devices = [...devices1, ...devices2];
-            const clients = await req.auth0.clients.getAll();
+            let allClients = [];
+            let total = null;
+            let page = 0;
+            const perPage = 100;
+
+            while (total === null || allClients.length < total) {
+              try {
+                // クライアントを取得
+                const response = await req.auth0.clients.getAll({
+                  page: page,
+                  per_page: perPage,
+                  include_totals: true
+                });
+
+                // 総クライアント数を設定
+                if (total === null && response.total) {
+                  total = response.total;
+                }
+
+                // クライアントを結果の配列に追加
+                allClients = allClients.concat(response.clients);
+
+                // ページ番号をインクリメント
+                page++;
+              } catch (err) {
+                return next(err);
+              }
+            }
+
             devices = devices.filter(device => {
-              if(req.user && req.user.app_metadata && Array.isArray(req.user.app_metadata.managed_apps)){
+              if (req.user && req.user.app_metadata && Array.isArray(req.user.app_metadata.managed_apps)) {
                 return req.user.app_metadata.managed_apps.includes(device.client_id);
               }
               return false;
             }).map(device => {
-              return { ...device, client_name: clients.find(client => client.client_id === device.client_id).name }
+              const target = allClients.find(client => client.client_id === device.client_id);
+              return { ...device, client_name: target.name}
             })
             return res.json({ devices });
           } catch (err) {
@@ -527,21 +556,21 @@ export default (storage, scriptManager) => {
   api.get('/:id/logs', verifyUserAccess('read:logs', scriptManager), (req, res, next) => {
     getApiToken(req)
       .then((accessToken) => {
-    //アプリ管理者のapp_metadata内のClientIDを取得
-   let app_list = req.user.app_metadata.managed_apps;
+        //アプリ管理者のapp_metadata内のClientIDを取得
+        let app_list = req.user.app_metadata.managed_apps;
 
-    let query = "";
-    for (let i = 0; i < app_list.length; ++i) {
-      //取り出した値が配列の最後の値だったら"OR"を付与しない
-     if (i === app_list.length - 1) {
-      query += 'client_id:' + app_list[i];
-     } else {
-      query += 'client_id:' + app_list[i] + ' OR ';
-     }
-    }
+        let query = "";
+        for (let i = 0; i < app_list.length; ++i) {
+          //取り出した値が配列の最後の値だったら"OR"を付与しない
+          if (i === app_list.length - 1) {
+            query += 'client_id:' + app_list[i];
+          } else {
+            query += 'client_id:' + app_list[i] + ' OR ';
+          }
+        }
         const options = {
           //qパラメータにアプリ管理者が管理するアプリのclient_idを指定する
-          uri: `https://${config('AUTH0_DOMAIN')}/api/v2/users/${encodeURIComponent(req.params.id)}/logs?q=${query}`, 
+          uri: `https://${config('AUTH0_DOMAIN')}/api/v2/users/${encodeURIComponent(req.params.id)}/logs?q=${query}`,
           headers: {
             authorization: `Bearer ${accessToken}`
           },
