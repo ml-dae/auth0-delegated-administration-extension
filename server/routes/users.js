@@ -13,6 +13,7 @@ import { requestUserBlocks, removeUserBlocks } from '../lib/userBlocks';
 import getApiToken from '../lib/getApiToken';
 import getConnectionIdByName from '../lib/getConnectionIdByName';
 
+
 const isValidField = (type, onlyTheseFields, field) =>
   ((onlyTheseFields && _.includes(onlyTheseFields, field.property)) || (!onlyTheseFields && field[type] !== false));
 
@@ -308,9 +309,28 @@ export default (storage, scriptManager) => {
                 } else if (!data.user.multifactor && enrollments) {
                   data.user.multifactor = ['guardian'];
                 }
-
-                return res.json(data);
+                return accessToken;
               });
+          }).then(accessToken => {
+            const axios = require('axios');
+            let call_params = {
+              method: 'get',
+              maxBodyLength: Infinity,
+              url: `https://${config('AUTH0_DOMAIN')}/api/v2/users/${user.user_id}/authentication-methods`,
+              headers: {
+                'Accept': 'application/json',
+                authorization: `Bearer ${accessToken}`
+              }
+            };
+            return axios.request(call_params)
+              .then((response) => {
+                const mfa = JSON.stringify(response.data);
+                const phoneData= response.data.find(item=>item.type === 'phone');
+                if(phoneData){
+                  data.user.phone_number = phoneData.phone_number;
+                }
+                return res.json(data);
+              })
           })
       )
       .catch((err) => {
@@ -538,7 +558,7 @@ export default (storage, scriptManager) => {
               return false;
             }).map(device => {
               const target = allClients.find(client => client.client_id === device.client_id);
-              return { ...device, client_name: target.name}
+              return { ...device, client_name: target.name }
             })
             return res.json({ devices });
           } catch (err) {
