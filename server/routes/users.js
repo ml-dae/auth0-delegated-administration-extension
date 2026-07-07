@@ -1,4 +1,4 @@
-import _ from 'lodash';
+import _, { method } from 'lodash';
 import auth0 from 'auth0';
 import request from 'request';
 import Promise from 'bluebird';
@@ -344,7 +344,14 @@ export default (storage, scriptManager) => {
                 data.user.multifactor = Array.isArray(methods) && methods.length > 0
                   ? [...new Set(methods.map(m => m.type).filter(Boolean))]
                   : null;
-
+                
+                if (Array.isArray(methods)) {
+                  const phoneData = methods.find(method=>method.type==='phone');
+                  
+                  if(phoneData && phoneData.phone_number ) {
+                    data.user.phone_number = phoneData.phone_number;
+                  }
+                }
                 return res.json(data);
               });
           })
@@ -557,7 +564,55 @@ export default (storage, scriptManager) => {
    */
   api.get('/:id/devices', verifyUserAccess('read:devices', scriptManager), (req, res, next) => {
     req.auth0.deviceCredentials.getAll({ user_id: req.params.id })
-      .then(devices => res.json({ devices }))
+      .then(devices1 => { 
+        req.auth0.deviceCredentials.getAll({ user_id: req.params.id, type: "rotating_refresh_token" }) 
+ 		      .then(async devices2 => { 
+ 		        try { 
+ 		          let devices = [...devices1, ...devices2]; 
+ 		          let allClients = []; 
+ 		          let total = null; 
+ 		          let page = 0; 
+ 		          const perPage = 100; 
+ 		 
+ 		          while (total === null || allClients.length < total) { 
+ 		            try { 
+ 		              // クライアントを取得 
+ 		              const response = await req.auth0.clients.getAll({ 
+ 		                page: page, 
+ 		                per_page: perPage, 
+ 		                include_totals: true 
+ 		              }); 
+ 		 
+ 		              // 総クライアント数を設定 
+ 		              if (total === null && response.total) { 
+ 		                total = response.total; 
+ 		              } 
+ 		 
+ 		              // クライアントを結果の配列に追加 
+ 		              allClients = allClients.concat(response.clients); 
+ 		              // ページ番号をインクリメント 
+ 		              page++; 
+ 		            } catch (err) { 
+ 		              return next(err); 
+ 		            } 
+ 		          } 
+ 		 
+ 		          devices = devices.filter(device => { 
+ 		            if (req.user && req.user.app_metadata && Array.isArray(req.user.app_metadata.managed_apps)) { 
+ 		              return req.user.app_metadata.managed_apps.includes(device.client_id); 
+ 		            } 
+ 		            return false; 
+ 		          }).map(device => { 
+ 		            const target = allClients.find(client => client.client_id === device.client_id); 
+ 		            return { ...device, client_name: target.name } 
+ 		          }) 
+ 		          return res.json({ devices }); 
+ 		        } catch (err) { 
+ 		          return next(err); 
+ 		        } 
+ 		      }) 
+ 		      .catch(next); 
+ 		    }) 
       .catch(next);
   });
 
@@ -567,8 +622,22 @@ export default (storage, scriptManager) => {
   api.get('/:id/logs', verifyUserAccess('read:logs', scriptManager), (req, res, next) => {
     getApiToken(req)
       .then((accessToken) => {
+        //アプリ管理者のapp_metadata内のClientIDを取得
+        let app_list = req.user.app_metadata.managed_apps;
+ 		 
+ 		    let query = "";
+ 		    for (let i = 0; i < app_list.length; ++i) {
+ 		      //取り出した値が配列の最後の値だったら"OR"を付与しない
+ 		      if (i === app_list.length - 1) {
+ 		        query += 'client_id:' + app_list[i];
+ 		      } else {
+ 		        query += 'client_id:' + app_list[i] + ' OR ';
+ 		      }
+ 		    }
+
         const options = {
-          uri: `https://${config('AUTH0_DOMAIN')}/api/v2/users/${encodeURIComponent(req.params.id)}/logs`,
+          //qパラメータにアプリ管理者が管理するアプリのclient_idを指定する
+          uri: `https://${config('AUTH0_DOMAIN')}/api/v2/users/${encodeURIComponent(req.params.id)}/logs?q=${query}`,
           headers: {
             authorization: `Bearer ${accessToken}`
           },
